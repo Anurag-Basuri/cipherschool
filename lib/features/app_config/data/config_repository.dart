@@ -32,9 +32,10 @@ class ConfigRepository {
   Stream<int> get remoteUpdates => _remoteUpdates();
 
   /// Fetches the latest config.
-  Future<AppConfig> load() async {
+  Future<AppConfig> load({bool bypassCache = true}) async {
     try {
-      final json = await _client.get('/v1/config') as Map<String, dynamic>;
+      final json = await _client.get('/v1/config', bypassCache: bypassCache)
+          as Map<String, dynamic>;
       final values = (json['values'] as Map).cast<String, Object?>();
       return AppConfig.fromValues(values);
     } on ApiException {

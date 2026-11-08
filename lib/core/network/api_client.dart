@@ -28,9 +28,16 @@ class ApiClient {
 
   final Map<String, _CachedResponse> _responseCache = {};
 
-  Future<dynamic> get(String path, {Map<String, String> query = const {}}) {
+  void clearCache() => _responseCache.clear();
+
+  Future<dynamic> get(
+    String path, {
+    Map<String, String> query = const {},
+    bool bypassCache = false,
+  }) {
     return _getWithRetry(
       TransportRequest(method: 'GET', path: path, query: query),
+      bypassCache: bypassCache,
     );
   }
 
@@ -49,11 +56,16 @@ class ApiClient {
     );
   }
 
-  Future<dynamic> _getWithRetry(TransportRequest request) async {
-    final cached = _responseCache[request.cacheKey];
-    if (cached != null &&
-        _clock().difference(cached.storedAt) < responseCacheTtl) {
-      return jsonDecode(cached.body);
+  Future<dynamic> _getWithRetry(
+    TransportRequest request, {
+    bool bypassCache = false,
+  }) async {
+    if (!bypassCache) {
+      final cached = _responseCache[request.cacheKey];
+      if (cached != null &&
+          _clock().difference(cached.storedAt) < responseCacheTtl) {
+        return jsonDecode(cached.body);
+      }
     }
 
     ApiException? lastError;
@@ -63,6 +75,9 @@ class ApiClient {
         return result;
       } on ApiException catch (e) {
         lastError = e;
+        if (!e.isTransient) {
+          rethrow;
+        }
         if (attempt < maxRetries) {
           await Future<void>.delayed(retryBaseDelay * (1 << attempt));
         }

@@ -32,15 +32,17 @@ class OrderApi {
     return Order.fromJson(json);
   }
 
-  Future<List<Order>> getOrders() async {
-    final json = await _client.get('/v1/orders') as Map<String, dynamic>;
+  Future<List<Order>> getOrders({bool bypassCache = true}) async {
+    final json = await _client.get('/v1/orders', bypassCache: bypassCache)
+        as Map<String, dynamic>;
     return (json['items'] as List)
         .map((e) => Order.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 
-  Future<Order> getOrder(String id) async {
-    final json = await _client.get('/v1/orders/$id') as Map<String, dynamic>;
+  Future<Order> getOrder(String id, {bool bypassCache = true}) async {
+    final json = await _client.get('/v1/orders/$id', bypassCache: bypassCache)
+        as Map<String, dynamic>;
     return Order.fromJson(json);
   }
 }
