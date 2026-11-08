@@ -26,3 +26,9 @@ ios/Flutter/Flutter.podspec
 **/ios/Flutter/Generated.xcconfig
 
 .DS_Store
+
+# Assignment working files
+*.zip
+*.pdf
+*.bundle
+patches/
