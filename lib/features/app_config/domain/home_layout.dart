@@ -26,11 +26,12 @@ class HomeLayout {
     if (rawJson == null || rawJson.trim().isEmpty) {
       return defaultSections;
     }
+
     try {
       final decoded = jsonDecode(rawJson);
       if (decoded is! List) return defaultSections;
 
-      final result = <HomeSection>[];
+      final sections = <HomeSection>[];
       final seen = <HomeSection>{};
 
       for (final item in decoded) {
@@ -43,12 +44,11 @@ class HomeLayout {
           _ => null,
         };
         if (section != null && seen.add(section)) {
-          result.add(section);
+          sections.add(section);
         }
       }
 
-      if (result.isEmpty) return defaultSections;
-      return result;
+      return sections.isEmpty ? defaultSections : sections;
     } catch (_) {
       return defaultSections;
     }

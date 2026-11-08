@@ -31,7 +31,7 @@ class HomeScreen extends ConsumerWidget {
     final config = ref.watch(appConfigControllerProvider);
     final appVersion = ref.watch(appVersionProvider);
 
-    // 1. Version gate: required update blocks the app
+    // Required update blocks the app completely until updated.
     final updateReq = UpdatePolicy.evaluate(
       currentVersion: appVersion,
       minSupportedVersion: config.minSupportedVersion,
@@ -43,21 +43,22 @@ class HomeScreen extends ConsumerWidget {
         body: SafeArea(
           child: Center(
             child: Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.system_update, size: 72, color: Colors.red),
+                  const Icon(Icons.system_update, size: 64, color: Colors.red),
                   const SizedBox(height: 16),
                   const Text(
                     'Update required',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   Text(
-                    'Your app version ($appVersion) is no longer supported. '
-                    'Please update to continue using QuickKart.',
+                    'This version of QuickKart is no longer supported. '
+                    'Please update to continue.',
                     textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey.shade700),
                   ),
                   const SizedBox(height: 24),
                   FilledButton(
@@ -74,7 +75,7 @@ class HomeScreen extends ConsumerWidget {
 
     final storeName = ref.watch(mockServerProvider).storeName;
     final dismissedVersion = ref.watch(dismissedOptionalUpdateProvider);
-    final showOptionalUpdate = updateReq == UpdateRequirement.optional &&
+    final showOptionalPrompt = updateReq == UpdateRequirement.optional &&
         dismissedVersion != config.latestVersion;
 
     final layoutSections = HomeLayout.parse(config.homeSectionsJson);
@@ -111,7 +112,6 @@ class HomeScreen extends ConsumerWidget {
       body: PaginatedCatalogView(
         categoryId: kAllProductsCategory,
         headerSlivers: [
-          // Store Closed Banner
           if (!config.storeOpen)
             SliverToBoxAdapter(
               child: Container(
@@ -140,9 +140,7 @@ class HomeScreen extends ConsumerWidget {
                 ),
               ),
             ),
-
-          // Optional update banner
-          if (showOptionalUpdate)
+          if (showOptionalPrompt)
             SliverToBoxAdapter(
               child: Container(
                 margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
@@ -175,8 +173,6 @@ class HomeScreen extends ConsumerWidget {
                 ),
               ),
             ),
-
-          // Search Box
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
@@ -198,29 +194,28 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
           ),
-
-          // Server-Driven Sections in Configured Order
-          for (final section in layoutSections) ...[
-            if (section == HomeSection.banner && config.homeBanner != null)
-              SliverToBoxAdapter(
-                child: _HomeBannerWidget(banner: config.homeBanner!),
-              ),
-            if (section == HomeSection.categories)
-              const SliverToBoxAdapter(child: _CategoriesRow()),
-            if (section == HomeSection.deals)
-              const SliverToBoxAdapter(child: _DealsSection()),
-            if (section == HomeSection.allProducts)
-              const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: Text(
-                    'All products',
-                    style:
-                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          for (final section in layoutSections)
+            switch (section) {
+              HomeSection.banner => config.homeBanner != null
+                  ? SliverToBoxAdapter(
+                      child: _HomeBannerWidget(banner: config.homeBanner!),
+                    )
+                  : const SliverToBoxAdapter(child: SizedBox.shrink()),
+              HomeSection.categories =>
+                const SliverToBoxAdapter(child: _CategoriesRow()),
+              HomeSection.deals =>
+                const SliverToBoxAdapter(child: _DealsSection()),
+              HomeSection.allProducts => const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: Text(
+                      'All products',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
-              ),
-          ],
+            },
         ],
       ),
     );
@@ -292,7 +287,7 @@ class _DealsSection extends ConsumerWidget {
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Text(
-                '⚡ Top Deals',
+                '⚡ Hot Deals',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),

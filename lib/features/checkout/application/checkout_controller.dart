@@ -61,37 +61,33 @@ class CheckoutController extends Notifier<CheckoutState> {
 
   Future<CheckoutResult> placeOrder() async {
     if (state.isPlacingOrder) {
-      return const CheckoutFailure(
-        'An order is already being placed.',
-        canRetry: false,
-      );
+      return const CheckoutFailure('An order is already in progress.');
     }
+
     state = const CheckoutState(isPlacingOrder: true);
     try {
-      final result = await _executeCheckout();
+      final result = await _placeOrder();
       state = CheckoutState(lastResult: result);
       return result;
     } finally {
       if (state.isPlacingOrder) {
-        state = CheckoutState(isPlacingOrder: false, lastResult: state.lastResult);
+        state = CheckoutState(lastResult: state.lastResult);
       }
     }
   }
 
-  Future<CheckoutResult> _executeCheckout() async {
-    // 1. Store closed guard (checked without sending any network request)
+  Future<CheckoutResult> _placeOrder() async {
     final config = ref.read(appConfigControllerProvider);
     if (!config.storeOpen) {
-      return CheckoutFailure(config.storeClosedMessage, canRetry: false);
+      return CheckoutFailure(config.storeClosedMessage);
     }
 
-    // 2. Empty cart guard
     final cart = ref.read(cartControllerProvider);
     if (cart.isEmpty) {
-      return const CheckoutFailure('Your cart is empty', canRetry: false);
+      return const CheckoutFailure('Your cart is empty');
     }
 
-    // 3. Reconcile cart before placing order
+    // Verify current prices, stock and discounts before charging the user.
     final reconciler = ref.read(cartReconcilerProvider);
     final ReconciliationResult reconciliation;
     try {
@@ -113,69 +109,54 @@ class CheckoutController extends Notifier<CheckoutState> {
           .replace(reconciliation.cart);
     }
 
-    final orderCart = reconciliation.cart;
-    if (orderCart.isEmpty) {
-      return const CheckoutFailure('Your cart is empty', canRetry: false);
+    final currentCart = reconciliation.cart;
+    if (currentCart.isEmpty) {
+      return const CheckoutFailure('Your cart is empty');
     }
 
-    // 4. Idempotency Key generation & retrieval
-    final store = ref.read(keyValueStoreProvider);
-    final fingerprint = _cartFingerprint(orderCart);
-    final storedFingerprint =
-        await store.getString('checkout.pending_fingerprint');
-    String? idempotencyKey;
-    if (storedFingerprint == fingerprint) {
-      idempotencyKey = await store.getString('checkout.pending_key');
-    }
-    if (idempotencyKey == null || idempotencyKey.isEmpty) {
-      idempotencyKey =
-          'QK-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(999999)}';
-      await store.setString('checkout.pending_fingerprint', fingerprint);
-      await store.setString('checkout.pending_key', idempotencyKey);
-    }
+    // Reuse or generate an idempotency key tied to this exact cart snapshot.
+    final key = await _getOrCreateIdempotencyKey(currentCart);
+    final pricing = CartPricing.compute(currentCart, config);
 
-    final pricing = CartPricing.compute(orderCart, config);
-
-    // 5. Send order request with idempotency key and safe retry on timeout
     try {
-      final order = await _sendWithRetry(
-        orderCart,
+      final order = await _sendOrder(
+        currentCart,
         pricing,
-        idempotencyKey,
+        key,
         retryOnTimeout: true,
       );
-      await store.remove('checkout.pending_fingerprint');
-      await store.remove('checkout.pending_key');
+      await _clearIdempotencyKey();
       await ref.read(cartControllerProvider.notifier).clear();
       ref.invalidate(ordersProvider);
       return CheckoutSuccess(order);
     } on ApiTimeoutException {
       return const CheckoutFailure(
-        'The request timed out. Your order may have been placed. Please check My orders before trying again.',
+        'The request timed out. Your order may have been placed. '
+        'Please check My orders before trying again.',
         canRetry: true,
       );
     } on ClientException catch (e) {
       if (e.statusCode == 503 || e.code == 'STORE_CLOSED') {
-        return CheckoutFailure(e.message, canRetry: false);
+        return CheckoutFailure(e.message);
       }
       if (e.statusCode == 409 || e.statusCode == 422) {
         try {
-          final reReconcile = await reconciler.reconcile(orderCart);
+          final refreshed = await reconciler.reconcile(currentCart);
           await ref
               .read(cartControllerProvider.notifier)
-              .replace(reReconcile.cart);
-          return CheckoutNeedsReview(reReconcile);
+              .replace(refreshed.cart);
+          return CheckoutNeedsReview(refreshed);
         } catch (_) {
-          return CheckoutFailure(e.message, canRetry: false);
+          return CheckoutFailure(e.message);
         }
       }
-      return CheckoutFailure(e.message, canRetry: false);
+      return CheckoutFailure(e.message);
     } on ApiException catch (e) {
       return CheckoutFailure(e.message, canRetry: e.isTransient);
     }
   }
 
-  Future<Order> _sendWithRetry(
+  Future<Order> _sendOrder(
     Cart cart,
     CartPricing pricing,
     String idempotencyKey, {
@@ -189,7 +170,7 @@ class CheckoutController extends Notifier<CheckoutState> {
           );
     } on ApiTimeoutException {
       if (retryOnTimeout) {
-        return _sendWithRetry(
+        return _sendOrder(
           cart,
           pricing,
           idempotencyKey,
@@ -200,10 +181,36 @@ class CheckoutController extends Notifier<CheckoutState> {
     }
   }
 
+  Future<String> _getOrCreateIdempotencyKey(Cart cart) async {
+    final store = ref.read(keyValueStoreProvider);
+    final fingerprint = _cartFingerprint(cart);
+    final savedFingerprint =
+        await store.getString('checkout.idemp_fingerprint');
+
+    if (savedFingerprint == fingerprint) {
+      final existingKey = await store.getString('checkout.idemp_key');
+      if (existingKey != null && existingKey.isNotEmpty) {
+        return existingKey;
+      }
+    }
+
+    final newKey =
+        'QK-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(100000)}';
+    await store.setString('checkout.idemp_fingerprint', fingerprint);
+    await store.setString('checkout.idemp_key', newKey);
+    return newKey;
+  }
+
+  Future<void> _clearIdempotencyKey() async {
+    final store = ref.read(keyValueStoreProvider);
+    await store.remove('checkout.idemp_fingerprint');
+    await store.remove('checkout.idemp_key');
+  }
+
   String _cartFingerprint(Cart cart) {
     final lines = cart.lines
         .map((l) => '${l.productId}:${l.quantity}:${l.unitPricePaise}')
-        .join('|');
-    return '$lines;coupon=${cart.coupon?.code}';
+        .join(',');
+    return '$lines;${cart.coupon?.code}';
   }
 }

@@ -31,108 +31,111 @@ class CartReconciler {
   final DateTime Function() _clock;
 
   /// Returns a [ReconciliationResult] whose `cart` is what could be ordered
-  /// right now:
+  /// right now.
+  ///
   /// * every line's `unitPricePaise` equals the server's current price;
   /// * every line's `quantity` is `<= min(stock, maxPerOrder)` and its
   ///   `maxPerOrder` is refreshed to that same value;
   /// * lines whose product is out of stock or no longer sold are removed;
-  /// * the coupon is removed if it is expired or unknown, otherwise it is
-  ///   refreshed with the server's latest rules (a coupon whose minimum
-  ///   order is not met stays in the cart - see BUSINESS_RULES.md);
+  /// * the coupon is removed if it is expired or unknown, otherwise refreshed;
   /// * the order of the remaining lines is preserved.
   ///
-  /// `changes` lists every difference (one [CartChange] per product/coupon
-  /// issue). An unchanged cart returns an empty list and an equal cart.
-  ///
-  /// Throws an `ApiException` if the server cannot be reached. It must never
-  /// return a partially reconciled cart.
+  /// Throws an [ApiException] if the server cannot be reached. Never returns
+  /// a partially reconciled cart.
   Future<ReconciliationResult> reconcile(Cart cart) async {
-    final changes = <CartChange>[];
-
-    // 1. Fetch latest product data in batches of at most 50
-    final productIds = cart.lines.map((l) => l.productId).toList();
-    final serverProducts = <String, Product>{};
-    final missingIds = <String>{};
-
-    for (var i = 0; i < productIds.length; i += 50) {
-      final chunk = productIds.sublist(i, min(i + 50, productIds.length));
-      final batch = await catalogApi.getProductsByIds(chunk);
-      for (final p in batch.products) {
-        serverProducts[p.id] = p;
-      }
-      missingIds.addAll(batch.missingIds);
+    if (cart.isEmpty) {
+      return const ReconciliationResult(cart: Cart.empty(), changes: []);
     }
 
-    // 2. Reconcile each line preserving original order
-    final newLines = <CartLine>[];
+    // Fetch latest catalog details in chunks of 50 (batch endpoint limit).
+    final ids = cart.lines.map((l) => l.productId).toList();
+    final products = <String, Product>{};
+    final missing = <String>{};
+
+    for (var i = 0; i < ids.length; i += 50) {
+      final chunk = ids.sublist(i, min(i + 50, ids.length));
+      final batch = await catalogApi.getProductsByIds(chunk);
+      for (final p in batch.products) {
+        products[p.id] = p;
+      }
+      missing.addAll(batch.missingIds);
+    }
+
+    final changes = <CartChange>[];
+    final reconciledLines = <CartLine>[];
+
     for (final line in cart.lines) {
-      if (missingIds.contains(line.productId) ||
-          !serverProducts.containsKey(line.productId)) {
+      final product = products[line.productId];
+      if (product == null || missing.contains(line.productId)) {
         changes.add(ProductUnavailable(productId: line.productId));
         continue;
       }
 
-      final serverProduct = serverProducts[line.productId]!;
-      if (serverProduct.stock <= 0) {
+      if (!product.inStock) {
         changes.add(OutOfStock(productId: line.productId));
         continue;
       }
 
-      final available = min(serverProduct.stock, serverProduct.maxPerOrder);
-      var quantity = line.quantity;
-      if (quantity > available) {
+      final maxAllowed = min(product.stock, product.maxPerOrder);
+      var qty = line.quantity;
+      if (qty > maxAllowed) {
         changes.add(QuantityReduced(
           productId: line.productId,
-          requestedQuantity: line.quantity,
-          availableQuantity: available,
+          requestedQuantity: qty,
+          availableQuantity: maxAllowed,
         ));
-        quantity = available;
+        qty = maxAllowed;
       }
 
-      if (serverProduct.pricePaise != line.unitPricePaise) {
+      if (product.pricePaise != line.unitPricePaise) {
         changes.add(PriceChanged(
           productId: line.productId,
           oldPricePaise: line.unitPricePaise,
-          newPricePaise: serverProduct.pricePaise,
+          newPricePaise: product.pricePaise,
         ));
       }
 
-      newLines.add(line.copyWith(
-        name: serverProduct.name,
-        unitPricePaise: serverProduct.pricePaise,
-        quantity: quantity,
-        maxPerOrder: available,
+      reconciledLines.add(line.copyWith(
+        name: product.name,
+        unitPricePaise: product.pricePaise,
+        quantity: qty,
+        maxPerOrder: maxAllowed,
       ));
     }
 
-    // 3. Reconcile coupon if present
-    Coupon? newCoupon = cart.coupon;
+    // Refresh or drop coupon.
+    Coupon? refreshedCoupon = cart.coupon;
     if (cart.coupon != null) {
       try {
-        final validated = await couponApi.validate(cart.coupon!.code);
-        if (validated.isExpired(_clock())) {
-          changes
-              .add(CouponRemoved(code: cart.coupon!.code, reason: 'EXPIRED'));
-          newCoupon = null;
+        final latest = await couponApi.validate(cart.coupon!.code);
+        if (latest.isExpired(_clock())) {
+          changes.add(
+            CouponRemoved(code: cart.coupon!.code, reason: 'EXPIRED'),
+          );
+          refreshedCoupon = null;
         } else {
-          newCoupon = validated;
+          refreshedCoupon = latest;
         }
       } on ClientException catch (e) {
         if (e.code == 'COUPON_NOT_FOUND' || e.statusCode == 404) {
           changes.add(
-              CouponRemoved(code: cart.coupon!.code, reason: 'NOT_FOUND'));
-          newCoupon = null;
+            CouponRemoved(code: cart.coupon!.code, reason: 'NOT_FOUND'),
+          );
+          refreshedCoupon = null;
         } else if (e.code == 'COUPON_EXPIRED' || e.statusCode == 409) {
-          changes
-              .add(CouponRemoved(code: cart.coupon!.code, reason: 'EXPIRED'));
-          newCoupon = null;
+          changes.add(
+            CouponRemoved(code: cart.coupon!.code, reason: 'EXPIRED'),
+          );
+          refreshedCoupon = null;
         } else {
           rethrow;
         }
       }
     }
 
-    final newCart = Cart(lines: newLines, coupon: newCoupon);
-    return ReconciliationResult(cart: newCart, changes: changes);
+    return ReconciliationResult(
+      cart: Cart(lines: reconciledLines, coupon: refreshedCoupon),
+      changes: changes,
+    );
   }
 }

@@ -33,45 +33,42 @@ class UpdatePolicy {
     required String minSupportedVersion,
     required String latestVersion,
   }) {
-    final current = _parseVersion(currentVersion);
-    final minSupported = _parseVersion(minSupportedVersion);
-    final latest = _parseVersion(latestVersion);
+    final current = _parse(currentVersion);
+    final minSupported = _parse(minSupportedVersion);
+    final latest = _parse(latestVersion);
 
     if (current == null || minSupported == null || latest == null) {
       return UpdateRequirement.none;
     }
 
-    if (_compareVersions(current, minSupported) < 0) {
+    if (_compare(current, minSupported) < 0) {
       return UpdateRequirement.required;
     }
-    if (_compareVersions(current, latest) < 0) {
+    if (_compare(current, latest) < 0) {
       return UpdateRequirement.optional;
     }
     return UpdateRequirement.none;
   }
 
-  static List<int>? _parseVersion(String version) {
-    final trimmed = version.trim();
+  static List<int>? _parse(String raw) {
+    final trimmed = raw.trim();
     if (trimmed.isEmpty) return null;
-    final parts = trimmed.split('.');
-    if (parts.isEmpty) return null;
     final segments = <int>[];
-    for (final p in parts) {
-      if (p.isEmpty) return null;
-      final val = int.tryParse(p);
-      if (val == null || val < 0) return null;
-      segments.add(val);
+    for (final part in trimmed.split('.')) {
+      if (part.isEmpty) return null;
+      final n = int.tryParse(part);
+      if (n == null || n < 0) return null;
+      segments.add(n);
     }
     return segments;
   }
 
-  static int _compareVersions(List<int> a, List<int> b) {
-    final maxLen = max(a.length, b.length);
-    for (var i = 0; i < maxLen; i++) {
+  static int _compare(List<int> a, List<int> b) {
+    final length = max(a.length, b.length);
+    for (var i = 0; i < length; i++) {
       final segA = i < a.length ? a[i] : 0;
       final segB = i < b.length ? b[i] : 0;
-      if (segA < segB) return -1;
-      if (segA > segB) return 1;
+      if (segA != segB) return segA.compareTo(segB);
     }
     return 0;
   }
