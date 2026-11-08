@@ -16,9 +16,13 @@ class CartController extends Notifier<Cart> {
   Cart build() => const Cart.empty();
 
   /// Every mutation goes through here so that none can forget to persist.
+  ///
+  /// The new state is published *before* the (async) disk write. Otherwise a
+  /// second tap that arrives while the first write is in flight would read the
+  /// stale cart and silently overwrite the first change.
   Future<void> _commit(Cart updated) async {
-    await _storage.save(updated);
     state = updated;
+    await _storage.save(updated);
   }
 
   /// Used at startup with the cart restored from storage.
