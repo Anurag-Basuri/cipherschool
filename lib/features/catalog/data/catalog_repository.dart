@@ -44,7 +44,7 @@ class CatalogRepository {
     int limit = 10,
     bool bypassCache = false,
   }) async {
-    final cacheKey = 'page.${cursor ?? 'first'}';
+    final cacheKey = 'page.$categoryId.${cursor ?? 'first'}';
     try {
       final page = await _api.getProducts(
         categoryId: categoryId == kAllProductsCategory ? null : categoryId,
