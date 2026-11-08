@@ -10,7 +10,14 @@ final appConfigControllerProvider =
 
 class AppConfigController extends Notifier<AppConfig> {
   @override
-  AppConfig build() => AppConfig.defaults();
+  AppConfig build() {
+    final repo = ref.watch(configRepositoryProvider);
+    final subscription = repo.remoteUpdates.listen((_) async {
+      state = await repo.load();
+    });
+    ref.onDispose(subscription.cancel);
+    return AppConfig.defaults();
+  }
 
   /// Used at startup with the config loaded during bootstrap.
   void hydrate(AppConfig config) => state = config;

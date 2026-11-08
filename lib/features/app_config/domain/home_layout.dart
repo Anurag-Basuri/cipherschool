@@ -1,9 +1,9 @@
+import 'dart:convert';
+
 /// Sections the home screen knows how to render.
 enum HomeSection { banner, categories, deals, allProducts }
 
 /// Server-driven home screen layout.
-///
-/// ## TODO(F2) - implement [HomeLayout.parse]
 ///
 /// Contract (checked by hidden tests):
 /// * Input is the raw `home_sections` remote config value: a JSON array of
@@ -23,6 +23,34 @@ class HomeLayout {
   ];
 
   static List<HomeSection> parse(String? rawJson) {
-    throw UnimplementedError('F2: implement HomeLayout.parse');
+    if (rawJson == null || rawJson.trim().isEmpty) {
+      return defaultSections;
+    }
+    try {
+      final decoded = jsonDecode(rawJson);
+      if (decoded is! List) return defaultSections;
+
+      final result = <HomeSection>[];
+      final seen = <HomeSection>{};
+
+      for (final item in decoded) {
+        if (item is! String) continue;
+        final section = switch (item) {
+          'banner' => HomeSection.banner,
+          'categories' => HomeSection.categories,
+          'deals' => HomeSection.deals,
+          'all_products' => HomeSection.allProducts,
+          _ => null,
+        };
+        if (section != null && seen.add(section)) {
+          result.add(section);
+        }
+      }
+
+      if (result.isEmpty) return defaultSections;
+      return result;
+    } catch (_) {
+      return defaultSections;
+    }
   }
 }

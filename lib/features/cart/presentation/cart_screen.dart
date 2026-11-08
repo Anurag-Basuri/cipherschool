@@ -37,6 +37,29 @@ class CartScreen extends ConsumerWidget {
           : ListView(
               padding: const EdgeInsets.all(12),
               children: [
+                if (!config.storeOpen)
+                  Card(
+                    color: Colors.red.shade50,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.store_mall_directory_outlined,
+                              color: Colors.red),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              config.storeClosedMessage,
+                              style: TextStyle(
+                                color: Colors.red.shade900,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 if (pricing.amountForFreeDeliveryPaise > 0)
                   Card(
                     color: Colors.green.shade50,
@@ -269,15 +292,27 @@ class _PlaceOrderBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final placing = ref
         .watch(checkoutControllerProvider.select((s) => s.isPlacingOrder));
+    final storeOpen =
+        ref.watch(appConfigControllerProvider.select((c) => c.storeOpen));
+    final storeClosedMessage = ref
+        .watch(appConfigControllerProvider.select((c) => c.storeClosedMessage));
+
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: FilledButton(
           style: FilledButton.styleFrom(
             minimumSize: const Size.fromHeight(52),
-            backgroundColor: Colors.green.shade800,
+            backgroundColor:
+                storeOpen ? Colors.green.shade800 : Colors.grey.shade600,
           ),
-          onPressed: () => _placeOrder(context, ref),
+          onPressed: !storeOpen
+              ? () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(storeClosedMessage)),
+                  );
+                }
+              : () => _placeOrder(context, ref),
           child: Row(
             children: [
               Text(formatMoney(totalPaise),
@@ -291,6 +326,8 @@ class _PlaceOrderBar extends ConsumerWidget {
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white),
                 )
+              else if (!storeOpen)
+                const Text('Store closed 🔒')
               else
                 const Text('Place order  ▶'),
             ],
