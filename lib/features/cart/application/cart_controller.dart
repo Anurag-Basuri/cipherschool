@@ -15,6 +15,12 @@ class CartController extends Notifier<Cart> {
   @override
   Cart build() => const Cart.empty();
 
+  /// Every mutation goes through here so that none can forget to persist.
+  Future<void> _commit(Cart updated) async {
+    await _storage.save(updated);
+    state = updated;
+  }
+
   /// Used at startup with the cart restored from storage.
   void hydrate(Cart cart) => state = cart;
 
@@ -30,8 +36,7 @@ class CartController extends Notifier<Cart> {
       if (existing.quantity >= existing.maxPerOrder) return;
       updated = current.updateQuantity(product.id, existing.quantity + 1);
     }
-    await _storage.save(updated);
-    state = updated;
+    await _commit(updated);
   }
 
   /// Adds one more unit of a product that is already in the cart.
@@ -40,29 +45,26 @@ class CartController extends Notifier<Cart> {
     final line = current.lineFor(productId);
     if (line == null || line.quantity >= line.maxPerOrder) return;
     final updated = current.updateQuantity(productId, line.quantity + 1);
-    await _storage.save(updated);
-    state = updated;
+    await _commit(updated);
   }
 
   /// Removes one unit (and the line when it reaches zero).
   Future<void> decrement(String productId) async {
     final line = state.lineFor(productId);
     if (line == null) return;
-    state = state.updateQuantity(productId, line.quantity - 1);
+    await _commit(state.updateQuantity(productId, line.quantity - 1));
   }
 
   Future<void> remove(String productId) async {
-    state = state.removeLine(productId);
+    await _commit(state.removeLine(productId));
   }
 
   Future<void> applyCoupon(Coupon coupon) async {
-    final updated = state.withCoupon(coupon);
-    await _storage.save(updated);
-    state = updated;
+    await _commit(state.withCoupon(coupon));
   }
 
   Future<void> removeCoupon() async {
-    state = state.withoutCoupon();
+    await _commit(state.withoutCoupon());
   }
 
   /// Replaces the whole cart (e.g. after reconciliation).
